@@ -505,8 +505,8 @@ enum_docs_reduce_to_count(Reds) ->
 count_changes_since(Db, SinceSeq) ->
     {ok, Changes} = 
     couch_btree:fold_reduce(Db#db.docinfo_by_seq_btree,
-        SinceSeq + 1, % startkey
-        ok, % endkey
+        [{SinceSeq + 1, % startkey
+        ok}], % endkey
         fun(_,_) -> true end, % groupkeys
         fun(_SeqStart, PartialReds, ok) ->
             {ok, couch_btree:final_reduce(Db#db.docinfo_by_seq_btree, PartialReds)}

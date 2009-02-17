@@ -14,7 +14,7 @@
 
 -export([open/2, open/3, query_modify/4, add/2, add_remove/3, foldl/3, foldl/4]).
 -export([foldr/3, foldr/4, fold/4, fold/5, full_reduce/1, final_reduce/2]).
--export([fold_reduce/6, fold_reduce/7, lookup/2, get_state/1, set_options/2]).
+-export([fold_reduce/5, fold_reduce/6, lookup/2, get_state/1, set_options/2]).
 -export([test/1, test/0, test_remove/2, test_add/2]).
 
 -define(CHUNK_THRESHOLD, 16#4ff).
@@ -70,19 +70,23 @@ final_reduce(Reduce, {KVs, Reductions}) ->
     Red = Reduce(reduce, KVs),
     final_reduce(Reduce, {[], [Red | Reductions]}).
     
-fold_reduce(Bt, StartKey, EndKey, KeyGroupFun, Fun, Acc) ->
-    fold_reduce(Bt, fwd, StartKey, EndKey, KeyGroupFun, Fun, Acc).
+fold_reduce(Bt, Stripes, KeyGroupFun, Fun, Acc) ->
+    fold_reduce(Bt, fwd, Stripes, KeyGroupFun, Fun, Acc).
 
-fold_reduce(#btree{root=Root}=Bt, Dir, StartKey, EndKey, KeyGroupFun, Fun, Acc) ->
-    {StartKey2, EndKey2} =
-    case Dir of
-        rev -> {EndKey, StartKey};
-        fwd -> {StartKey, EndKey}
-    end,
+fold_reduce(#btree{root=Root}=Bt, Dir, Stripes, KeyGroupFun, Fun, Acc) ->
     try
-        {ok, Acc2, GroupedRedsAcc2, GroupedKVsAcc2, GroupedKey2} =
-            reduce_stream_node(Bt, Dir, Root, StartKey2, EndKey2, nil, [], [],
-            KeyGroupFun, Fun, Acc),
+        {Acc2, GroupedKey2, GroupedKVsAcc2, GroupedRedsAcc2} = lists:foldl(
+          fun({Start, End}, {MyAcc, MyGroupedKey, MyGroupedKVsAcc, MyGroupedRedsAcc}) ->
+            {Start2, End2} =
+            case Dir of
+                rev -> {End, Start};
+                fwd -> {Start, End}
+            end,
+            {ok, RetAcc, RetGroupedRedsAcc, RetGroupedKVsAcc, RetGroupedKey} = 
+                reduce_stream_node(Bt, Dir, Root, Start2, End2, MyGroupedKey,
+                      MyGroupedKVsAcc, MyGroupedRedsAcc, KeyGroupFun, Fun, MyAcc),
+            {RetAcc, RetGroupedKey, RetGroupedKVsAcc, RetGroupedRedsAcc}
+          end, {Acc, nil, [], []}, Stripes),
         if GroupedKey2 == nil ->
             {ok, Acc2};
         true ->
@@ -785,25 +789,25 @@ test_btree(KeyValues) ->
     Half = Len div 2,
     
     {ok, [{{"odd", _}, Half}, {{"even",_}, Half}]} =
-        fold_reduce(Btree100, nil, nil, GroupingFun, FoldFun, []),
+        fold_reduce(Btree100, [{nil, nil}], GroupingFun, FoldFun, []),
     
     {ok, [{{"even",_}, Half}, {{"odd", _}, Half}]} =
-        fold_reduce(Btree100, rev, nil, nil, GroupingFun, FoldFun, []),
+        fold_reduce(Btree100, rev, [{nil, nil}], GroupingFun, FoldFun, []),
         
     {ok, [{{"even",_}, Half}]} =
-        fold_reduce(Btree100, fwd, {"even", -1}, {"even", foo}, GroupingFun, FoldFun, []),
+        fold_reduce(Btree100, fwd, [{{"even", -1}, {"even", foo}}], GroupingFun, FoldFun, []),
         
     {ok, [{{"even",_}, Half}]} =
-        fold_reduce(Btree100, rev, {"even", foo}, {"even", -1}, GroupingFun, FoldFun, []),
+        fold_reduce(Btree100, rev, [{{"even", foo}, {"even", -1}}], GroupingFun, FoldFun, []),
         
     {ok, [{{"odd",_}, Half}]} =
-        fold_reduce(Btree100, fwd, {"odd", -1}, {"odd", foo}, GroupingFun, FoldFun, []),
+        fold_reduce(Btree100, fwd, [{{"odd", -1}, {"odd", foo}}], GroupingFun, FoldFun, []),
     
     {ok, [{{"odd",_}, Half}]} =
-        fold_reduce(Btree100, rev, {"odd", foo}, {"odd", -1}, GroupingFun, FoldFun, []),
+        fold_reduce(Btree100, rev, [{{"odd", foo}, {"odd", -1}}], GroupingFun, FoldFun, []),
     
     {ok, [{{"odd", _}, Half}, {{"even",_}, Half}]} =
-        fold_reduce(Btree100, {"even", -1}, {"odd", foo}, GroupingFun, FoldFun, []),
+        fold_reduce(Btree100, [{{"even", -1}, {"odd", foo}}], GroupingFun, FoldFun, []),
     
     ok = couch_file:close(Fd).
     

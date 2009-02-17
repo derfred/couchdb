@@ -172,12 +172,11 @@ db_req(#httpd{path_parts=[_,<<"_purge">>]}=Req, _Db) ->
     send_method_not_allowed(Req, "POST");
    
 db_req(#httpd{method='GET',path_parts=[_,<<"_all_docs">>]}=Req, Db) ->
-    all_docs_view(Req, Db, nil);
+    all_docs_view(Req, Db);
 
 db_req(#httpd{method='POST',path_parts=[_,<<"_all_docs">>]}=Req, Db) ->
     {Props} = couch_httpd:json_body(Req),
-    Keys = proplists:get_value(<<"keys">>, Props, nil),
-    all_docs_view(Req, Db, Keys);
+    all_docs_view(Req#httpd{json_body=Props}, Db);
 
 db_req(#httpd{path_parts=[_,<<"_all_docs">>]}=Req, _Db) ->
     send_method_not_allowed(Req, "GET,HEAD,POST");
@@ -281,15 +280,16 @@ db_req(#httpd{path_parts=[_, DocId]}=Req, Db) ->
 db_req(#httpd{path_parts=[_, DocId | FileNameParts]}=Req, Db) ->
     db_attachment_req(Req, Db, DocId, FileNameParts).
 
-all_docs_view(Req, Db, Keys) -> 
+all_docs_view(Req, Db) -> 
     #view_query_args{
         start_key = StartKey,
         start_docid = StartDocId,
         end_key = EndKey,
         limit = Limit,
         skip = SkipCount,
-        direction = Dir
-    } = QueryArgs = couch_httpd_view:parse_view_query(Req, Keys),    
+        direction = Dir,
+        keys = Keys
+    } = QueryArgs = couch_httpd_view:parse_view_query(Req),    
     {ok, Info} = couch_db:get_db_info(Db),
     CurrentEtag = couch_httpd:make_etag(proplists:get_value(update_seq, Info)),
     couch_httpd:etag_respond(Req, CurrentEtag, fun() -> 

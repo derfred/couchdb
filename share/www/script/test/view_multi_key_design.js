@@ -39,7 +39,7 @@ couchTests.view_multi_key_design = function(debug) {
 
   // Test that missing keys work too
   var keys = [101,30,15,37,50]
-  var reduce = db.view("test/summate",{group:true},keys).rows;
+  var reduce = db.view("test/summate",{group:true},{keys: keys}).rows;
   T(reduce.length == keys.length-1); // 101 is missing
   for(var i=0; i<reduce.length; i++) {
     T(keys.indexOf(reduce[i].key) != -1);
@@ -48,13 +48,13 @@ couchTests.view_multi_key_design = function(debug) {
 
   // First, the goods:
   var keys = [10,15,30,37,50];
-  var rows = db.view("test/all_docs",{},keys).rows;
+  var rows = db.view("test/all_docs",{},{keys: keys}).rows;
   for(var i=0; i<rows.length; i++) {
     T(keys.indexOf(rows[i].key) != -1);
     T(rows[i].key == rows[i].value);
   }
   
-  var reduce = db.view("test/summate",{group:true},keys).rows;
+  var reduce = db.view("test/summate",{group:true},{keys: keys}).rows;
   T(reduce.length == keys.length);
   for(var i=0; i<reduce.length; i++) {
     T(keys.indexOf(reduce[i].key) != -1);
@@ -66,7 +66,7 @@ couchTests.view_multi_key_design = function(debug) {
   for(var i in badargs)
   {
       try {
-          db.view("test/all_docs",badargs[i],keys);
+          db.view("test/all_docs",badargs[i],{keys: keys});
           T(0==1);
       } catch (e) {
           T(e.error == "query_parse_error");
@@ -74,19 +74,19 @@ couchTests.view_multi_key_design = function(debug) {
   }
 
   try {
-      db.view("test/summate",{},keys);
+      db.view("test/summate",{},{keys: keys});
       T(0==1);
   } catch (e) {
       T(e.error == "query_parse_error");
   }
 
   // Test that a map & reduce containing func support keys when reduce=false
-  resp = db.view("test/summate", {reduce: false}, keys);
+  resp = db.view("test/summate", {reduce: false}, {keys: keys});
   T(resp.rows.length == 5);
 
   // Check that limiting by startkey_docid and endkey_docid get applied
   // as expected.
-  var curr = db.view("test/multi_emit", {startkey_docid: 21, endkey_docid: 23}, [0, 2]).rows;
+  var curr = db.view("test/multi_emit", {startkey_docid: 21, endkey_docid: 23}, {keys: [0, 2]}).rows;
   var exp_key = [ 0,  0,  0,  2,  2,  2] ;
   var exp_val = [21, 22, 23, 21, 22, 23] ;
   T(curr.length == 6);
@@ -97,41 +97,41 @@ couchTests.view_multi_key_design = function(debug) {
   }
 
   // Check limit works
-  curr = db.view("test/all_docs", {limit: 1}, keys).rows;
+  curr = db.view("test/all_docs", {limit: 1}, {keys: keys}).rows;
   T(curr.length == 1);
   T(curr[0].key == 10);
 
   // Check offset works
-  curr = db.view("test/multi_emit", {skip: 1}, [0]).rows;
+  curr = db.view("test/multi_emit", {skip: 1}, {keys: [0]}).rows;
   T(curr.length == 99);
   T(curr[0].value == 1);
 
   // Check that dir works
-  curr = db.view("test/multi_emit", {descending: "true"}, [1]).rows;
+  curr = db.view("test/multi_emit", {descending: "true"}, {keys: [1]}).rows;
   T(curr.length == 100);
   T(curr[0].value == 99);
   T(curr[99].value == 0);
 
   // Check a couple combinations
-  curr = db.view("test/multi_emit", {descending: "true", skip: 3, limit: 2}, [2]).rows;
+  curr = db.view("test/multi_emit", {descending: "true", skip: 3, limit: 2}, {keys: [2]}).rows;
   T(curr.length, 2);
   T(curr[0].value == 96);
   T(curr[1].value == 95);
 
-  curr = db.view("test/multi_emit", {skip: 2, limit: 3, startkey_docid: "13"}, [0]).rows;
+  curr = db.view("test/multi_emit", {skip: 2, limit: 3, startkey_docid: "13"}, {keys: [0]}).rows;
   T(curr.length == 3);
   T(curr[0].value == 15);
   T(curr[1].value == 16);
   T(curr[2].value == 17);
 
   curr = db.view("test/multi_emit",
-          {skip: 1, limit: 5, startkey_docid: "25", endkey_docid: "27"}, [1]).rows;
+          {skip: 1, limit: 5, startkey_docid: "25", endkey_docid: "27"}, {keys: [1]}).rows;
   T(curr.length == 2);
   T(curr[0].value == 26);
   T(curr[1].value == 27);
 
   curr = db.view("test/multi_emit",
-          {skip: 1, limit: 5, startkey_docid: "28", endkey_docid: "26", descending: "true"}, [1]).rows;
+          {skip: 1, limit: 5, startkey_docid: "28", endkey_docid: "26", descending: "true"}, {keys: [1]}).rows;
   T(curr.length == 2);
   T(curr[0].value == 27);
   T(curr[1].value == 26);

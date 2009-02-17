@@ -44,7 +44,7 @@ couchTests.view_include_docs = function(debug) {
   T(resp.rows[1].id == "1");
   T(resp.rows[1].doc._id == "1");
 
-  resp = db.view('test/all_docs', {include_docs: true}, [29, 74]);
+  resp = db.view('test/all_docs', {include_docs: true}, {keys: [29, 74]});
   T(resp.rows.length == 2);
   T(resp.rows[0].doc._id == "29");
   T(resp.rows[1].doc.integer == 74);
@@ -91,7 +91,7 @@ couchTests.view_include_docs = function(debug) {
   T(after.integer == 100);
 
   // should emit the previous revision
-  resp = db.view("test/with_prev", {include_docs: true}, ["0"]);
+  resp = db.view("test/with_prev", {include_docs: true}, {keys: ["0"]});
   T(resp.rows[0].doc._id == "0");
   T(resp.rows[0].doc._rev == before._rev);
   T(!resp.rows[0].doc.prev);
@@ -101,7 +101,7 @@ couchTests.view_include_docs = function(debug) {
   T(xhr.status == 202)
   while (db.info().compact_running) {}
 
-  resp = db.view("test/with_prev", {include_docs: true}, ["0", "23"]);
+  resp = db.view("test/with_prev", {include_docs: true}, {keys: ["0", "23"]});
   T(resp.rows.length == 2);
   T(resp.rows[0].key == "0");
   T(resp.rows[0].id == "0");

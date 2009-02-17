@@ -23,13 +23,13 @@ couchTests.view_multi_key_temp = function(debug) {
   var reduceFun = function (keys, values) { return sum(values); };
 
   var keys = [10,15,30,37,50];
-  var rows = db.query(queryFun, null, {}, keys).rows;
+  var rows = db.query(queryFun, null, {}, {keys: keys}).rows;
   for(var i=0; i<rows.length; i++) {
     T(keys.indexOf(rows[i].key) != -1);
     T(rows[i].key == rows[i].value);
   }
   
-  var reduce = db.query(queryFun, reduceFun, {group:true}, keys).rows;
+  var reduce = db.query(queryFun, reduceFun, {group:true}, {keys: keys}).rows;
   for(var i=0; i<reduce.length; i++) {
     T(keys.indexOf(reduce[i].key) != -1);
     T(reduce[i].key == reduce[i].value);

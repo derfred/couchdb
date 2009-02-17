@@ -116,11 +116,8 @@ function CouchDB(name, httpHeaders) {
   }
 
   // Applies the map function to the contents of database and returns the results.
-  this.query = function(mapFun, reduceFun, options, keys) {
-    var body = {language: "javascript"};
-    if(keys) {
-      body.keys = keys ;      
-    }
+  this.query = function(mapFun, reduceFun, options, payload) {
+    var body = extract_body_params(payload);
     if (typeof(mapFun) != "string")
       mapFun = mapFun.toSource ? mapFun.toSource() : "(" + mapFun.toString() + ")";
     body.map = mapFun;
@@ -141,15 +138,15 @@ function CouchDB(name, httpHeaders) {
     return JSON.parse(this.last_req.responseText);
   }
 
-  this.view = function(viewname, options, keys) {
-    if(!keys) {
+  this.view = function(viewname, options, payload) {
+    if(!payload) {
       this.last_req = this.request("GET", this.uri + "_view/" +
           viewname + encodeOptions(options));      
     } else {
       this.last_req = this.request("POST", this.uri + "_view/" + 
         viewname + encodeOptions(options), {
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({keys:keys})
+        body: JSON.stringify(extract_body_params(payload))
       });      
     }
     if (this.last_req.status == 404)
@@ -247,8 +244,17 @@ function CouchDB(name, httpHeaders) {
       
     return object1;
   }
-  
-  
+
+  function extract_body_params(payload) {
+    var body = {language: "javascript"};
+    if(payload && payload.keys) {
+      body.keys = payload.keys;
+    } else if(payload && payload.stripes) {
+      body.stripes = payload.stripes;
+    }
+    return body;
+  }
+
 }
 
 // this is the XMLHttpRequest object from last request made by the following

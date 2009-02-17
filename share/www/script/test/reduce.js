@@ -26,26 +26,26 @@ couchTests.reduce = function(debug) {
   var reduce = function (keys, values) { return sum(values); };
   var result = db.query(map, reduce);
   T(result.rows[0].value == 2*summate(numDocs));
-
+  
   result = db.query(map, reduce, {startkey: 4, endkey: 4});
   T(result.rows[0].value == 8);
-
+  
   result = db.query(map, reduce, {startkey: 4, endkey: 5});
   T(result.rows[0].value == 18);
-
+  
   result = db.query(map, reduce, {startkey: 4, endkey: 6});
   T(result.rows[0].value == 30);
-
+  
   result = db.query(map, reduce, {group:true, limit:3});
   T(result.rows[0].value == 2);
   T(result.rows[1].value == 4);
   T(result.rows[2].value == 6);
-
+  
   for(var i=1; i<numDocs/2; i+=30) {
     result = db.query(map, reduce, {startkey: i, endkey: numDocs - i});
     T(result.rows[0].value == 2*(summate(numDocs-i) - summate(i-1)));
   }
-
+  
   db.deleteDb();
   db.createDb();
 

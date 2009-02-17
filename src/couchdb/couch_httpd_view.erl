@@ -15,32 +15,32 @@
 
 -export([handle_view_req/2,handle_temp_view_req/2]).
 
--export([parse_view_query/1,parse_view_query/2,parse_view_query/4,make_view_fold_fun/6,
+-export([parse_view_query/1,parse_view_query/2,parse_view_query/3,make_view_fold_fun/6,
     finish_view_fold/3, view_row_obj/3, view_group_etag/1, view_group_etag/2]).
 
 -import(couch_httpd,
     [send_json/2,send_json/3,send_json/4,send_method_not_allowed/2,send_chunk/2,
     start_json_response/2, start_json_response/3, end_json_response/1]).
 
-design_doc_view(Req, Db, Id, ViewName, Keys) ->
+design_doc_view(Req, Db, Id, ViewName) ->
     #view_query_args{
         stale = Stale,
         reduce = Reduce
-    } = QueryArgs = parse_view_query(Req, Keys),
+    } = QueryArgs = parse_view_query(Req),
     DesignId = <<"_design/", Id/binary>>,
     case couch_view:get_map_view(Db, DesignId, ViewName, Stale) of
     {ok, View, Group} ->    
-        output_map_view(Req, View, Group, Db, QueryArgs, Keys);
+        output_map_view(Req, View, Group, Db, QueryArgs);
     {not_found, Reason} ->
         case couch_view:get_reduce_view(Db, DesignId, ViewName, Stale) of
         {ok, ReduceView, Group} ->
-            parse_view_query(Req, Keys, true), % just for validation
+            parse_view_query(Req, true), % just for validation
             case Reduce of
             false ->
                 MapView = couch_view:extract_map_view(ReduceView),
-                output_map_view(Req, MapView, Group, Db, QueryArgs, Keys);
+                output_map_view(Req, MapView, Group, Db, QueryArgs);
             _ ->
-                output_reduce_view(Req, ReduceView, Group, QueryArgs, Keys)
+                output_reduce_view(Req, ReduceView, Group, QueryArgs)
             end;
         _ ->
             throw({not_found, Reason})
@@ -48,44 +48,51 @@ design_doc_view(Req, Db, Id, ViewName, Keys) ->
     end.
 
 handle_view_req(#httpd{method='GET',path_parts=[_,_, Id, ViewName]}=Req, Db) ->
-    design_doc_view(Req, Db, Id, ViewName, nil);
+    design_doc_view(Req, Db, Id, ViewName);
 
 handle_view_req(#httpd{method='POST',path_parts=[_,_, Id, ViewName]}=Req, Db) ->
     {Props} = couch_httpd:json_body(Req),
-    Keys = proplists:get_value(<<"keys">>, Props, nil),
-    design_doc_view(Req, Db, Id, ViewName, Keys);
+    design_doc_view(Req#httpd{json_body=Props}, Db, Id, ViewName);
 
 handle_view_req(Req, _Db) ->
     send_method_not_allowed(Req, "GET,POST,HEAD").
 
 handle_temp_view_req(#httpd{method='POST'}=Req, Db) ->
-    QueryArgs = parse_view_query(Req),
+    {Props} = couch_httpd:json_body(Req),
+    ?LOG_DEBUG("hier hier: ~p", [Props]),
+    QueryArgs = parse_view_query(Req#httpd{json_body=Props}),
 
     case couch_httpd:primary_header_value(Req, "content-type") of
         undefined -> ok;
         "application/json" -> ok;
         Else -> throw({incorrect_mime_type, Else})
     end,
-    {Props} = couch_httpd:json_body(Req),
+    
     Language = proplists:get_value(<<"language">>, Props, <<"javascript">>),
     {DesignOptions} = proplists:get_value(<<"options">>, Props, {[]}),
     MapSrc = proplists:get_value(<<"map">>, Props),
-    Keys = proplists:get_value(<<"keys">>, Props, nil),
     case proplists:get_value(<<"reduce">>, Props, null) of
     null ->
         {ok, View, Group} = couch_view:get_temp_map_view(Db, Language, 
             DesignOptions, MapSrc),
-        output_map_view(Req, View, Group, Db, QueryArgs, Keys);
+        output_map_view(Req, View, Group, Db, QueryArgs);
     RedSrc ->
         {ok, View, Group} = couch_view:get_temp_reduce_view(Db, Language, 
             DesignOptions, MapSrc, RedSrc),
-        output_reduce_view(Req, View, Group, QueryArgs, Keys)
+        output_reduce_view(Req, View, Group, QueryArgs)
     end;
 
 handle_temp_view_req(Req, _Db) ->
     send_method_not_allowed(Req, "POST").
 
-output_map_view(Req, View, Group, Db, QueryArgs, nil) ->
+output_map_view(Req, View, Group, Db, QueryArgs) ->
+    #view_query_args{
+        keys = Keys,
+        stripes = Stripes
+    } = QueryArgs,
+    output_map_view(Req, View, Group, Db, QueryArgs, Keys, Stripes).
+
+output_map_view(Req, View, Group, Db, QueryArgs, nil, nil) ->
     #view_query_args{
         limit = Limit,
         direction = Dir,
@@ -103,7 +110,7 @@ output_map_view(Req, View, Group, Db, QueryArgs, nil) ->
         finish_view_fold(Req, RowCount, FoldResult)
     end);
     
-output_map_view(Req, View, Group, Db, QueryArgs, Keys) ->
+output_map_view(Req, View, Group, Db, QueryArgs, Keys, nil) ->
     #view_query_args{
         limit = Limit,
         direction = Dir,
@@ -128,9 +135,41 @@ output_map_view(Req, View, Group, Db, QueryArgs, Keys) ->
                 couch_view:fold(View, Start, Dir, FoldlFun, FoldAcc)
             end, {ok, FoldAccInit}, Keys),
         finish_view_fold(Req, RowCount, FoldResult)
-    end).
+    end);
 
-output_reduce_view(Req, View, Group, QueryArgs, nil) ->
+output_map_view(Req, View, _Group, Db, QueryArgs, nil, Stripes) ->
+    #view_query_args{
+        limit = Limit,
+        direction = Dir,
+        skip = SkipCount
+    } = QueryArgs,
+    {ok, RowCount} = couch_view:get_row_count(View),
+    FoldAccInit = {Limit, SkipCount, undefined, []},
+    FoldResult = lists:foldl(
+        fun({{StartKey, _StartDocId}=Start, {EndKey, _EndDocId}}, {ok, FoldAcc}) ->
+            FoldlFun = make_view_fold_fun(Req,
+                QueryArgs#view_query_args{
+                    start_key = StartKey,
+                    end_key = EndKey
+                },
+                nil,   % insert correct ETag here
+                Db, RowCount, 
+                #view_fold_helper_funs{
+                    reduce_count = fun couch_view:reduce_to_count/1
+                }),
+            couch_view:fold(View, Start, Dir, FoldlFun, FoldAcc)
+        end, {ok, FoldAccInit}, Stripes),
+    finish_view_fold(Req, RowCount, FoldResult).
+
+
+output_reduce_view(Req, View, Group, QueryArgs) ->
+    #view_query_args{
+        keys = Keys,
+        stripes = Stripes
+    } = QueryArgs,
+    output_reduce_view(Req, View, Group, QueryArgs, Keys, Stripes).
+
+output_reduce_view(Req, View, Group, QueryArgs, nil, nil) ->
     #view_query_args{
         start_key = StartKey,
         end_key = EndKey,
@@ -146,13 +185,14 @@ output_reduce_view(Req, View, Group, QueryArgs, nil) ->
         {ok, Resp} = start_json_response(Req, 200, [{"Etag",CurrentEtag}]),
         {ok, GroupRowsFun, RespFun} = make_reduce_fold_funs(Resp, GroupLevel),
         send_chunk(Resp, "{\"rows\":["),
-        {ok, _} = couch_view:fold_reduce(View, Dir, {StartKey, StartDocId}, 
-            {EndKey, EndDocId}, GroupRowsFun, RespFun, {"", Skip, Limit}),
+        {ok, _} = couch_view:fold_reduce(View, Dir, 
+            [{{StartKey, StartDocId}, {EndKey, EndDocId}}],
+            GroupRowsFun, RespFun, {"", Skip, Limit}),
         send_chunk(Resp, "]}"),
         end_json_response(Resp)
     end);
-    
-output_reduce_view(Req, View, Group, QueryArgs, Keys) ->
+
+output_reduce_view(Req, View, Group, QueryArgs, Keys, nil) ->
     #view_query_args{
         limit = Limit,
         skip = Skip,
@@ -168,12 +208,29 @@ output_reduce_view(Req, View, Group, QueryArgs, Keys) ->
         send_chunk(Resp, "{\"rows\":["),
         lists:foldl(
             fun(Key, AccSeparator) ->
-                {ok, {NewAcc, _, _}} = couch_view:fold_reduce(View, Dir, {Key, StartDocId}, 
-                    {Key, EndDocId}, GroupRowsFun, RespFun, 
-                    {AccSeparator, Skip, Limit}),
+                {ok, {NewAcc, _, _}} = couch_view:fold_reduce(View, Dir, 
+                    [{{Key, StartDocId},{Key, EndDocId}}],
+                    GroupRowsFun, RespFun, {AccSeparator, Skip, Limit}),
                 NewAcc % Switch to comma
             end,
         "", Keys), % Start with no comma
+        send_chunk(Resp, "]}"),
+        end_json_response(Resp)
+    end);
+
+output_reduce_view(Req, View, Group, QueryArgs, nil, Stripes) ->
+    #view_query_args{
+        limit = Limit,
+        skip = Skip,
+        group_level = GroupLevel
+    } = QueryArgs,
+    CurrentEtag = view_group_etag(Group),
+    couch_httpd:etag_respond(Req, CurrentEtag, fun() ->
+        {ok, Resp} = start_json_response(Req, 200, [{"Etag",CurrentEtag}]),
+        {ok, GroupRowsFun, RespFun} = make_reduce_fold_funs(Resp, GroupLevel),
+        send_chunk(Resp, "{\"rows\":["),
+        {ok, _} = couch_view:fold_reduce(View, fwd, Stripes,
+              GroupRowsFun, RespFun, {"", Skip, Limit}),
         send_chunk(Resp, "]}"),
         end_json_response(Resp)
     end).
@@ -218,16 +275,17 @@ reverse_key_default({}) -> nil;
 reverse_key_default(Key) -> Key.
 
 parse_view_query(Req) ->
-    parse_view_query(Req, nil, nil).
-parse_view_query(Req, Keys) ->
-    parse_view_query(Req, Keys, nil).
-parse_view_query(Req, Keys, IsReduce) ->
-    parse_view_query(Req, Keys, IsReduce, false).
-parse_view_query(Req, Keys, IsReduce, IgnoreExtra) ->
+    parse_view_query(Req, nil).
+parse_view_query(Req, IsReduce) ->
+    parse_view_query(Req, IsReduce, false).
+parse_view_query(#httpd{json_body=Props}=Req, IsReduce, IgnoreExtra) ->
+    Keys = proplists:get_value(<<"keys">>, Props, nil),
     QueryList = couch_httpd:qs(Req),
     #view_query_args{
-        group_level = GroupLevel
-    } = QueryArgs = lists:foldl(fun({Key,Value}, Args) ->
+        group_level = GroupLevel,
+        start_docid = StartDocId,
+        end_docid = EndDocId
+    } = QueryArgsWithoutSelectors = lists:foldl(fun({Key,Value}, Args) ->
         case {Key, Value} of
         {"", _} ->
             Args;
@@ -356,6 +414,11 @@ parse_view_query(Req, Keys, IsReduce, IgnoreExtra) ->
             end
         end
     end, #view_query_args{}, QueryList),
+    %% fill in the keys and parsed stripe list
+    QueryArgs = QueryArgsWithoutSelectors#view_query_args{
+      keys=Keys,
+      stripes=parse_stripes(proplists:get_value(<<"stripes">>, Props, nil), StartDocId, EndDocId)
+    },
     case IsReduce of
     true ->
         case QueryArgs#view_query_args.include_docs and QueryArgs#view_query_args.reduce of
@@ -392,6 +455,18 @@ parse_view_query(Req, Keys, IsReduce, IgnoreExtra) ->
             end
         end
     end.
+
+
+parse_stripes(nil, _StartDocId, _EndDocId) ->
+    nil;
+
+parse_stripes(UnparsedStripes, StartDocId, EndDocId) ->
+    MapFun = fun({[{<<"startkey">>, StartKey}, {<<"endkey">>, EndKey}]}) ->
+                  {{StartKey, StartDocId}, {EndKey, EndDocId}};
+                ({[{<<"endkey">>, EndKey}, {<<"startkey">>, StartKey}]}) ->
+                  {{StartKey, StartDocId}, {EndKey, EndDocId}}
+              end,
+    lists:map(MapFun, UnparsedStripes).
 
 make_view_fold_fun(Req, QueryArgs, Etag, Db,
     TotalViewCount, HelperFuns) ->

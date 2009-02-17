@@ -60,7 +60,8 @@
     method,
     path_parts,
     db_url_handlers,
-    user_ctx
+    user_ctx,
+    json_body = []
     }).
     
 
@@ -150,7 +151,9 @@
     skip = 0,
     group_level = 0,
     reduce = true,
-    include_docs = false
+    include_docs = false,
+    keys = nil,
+    stripes = nil
 }).
 
 -record(view_fold_helper_funs, {
